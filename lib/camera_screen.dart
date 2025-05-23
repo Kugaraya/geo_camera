@@ -168,7 +168,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     ),
                     child: Text(
                       'Lat: ${state.latitude.toStringAsFixed(6)}, Lng: ${state.longitude.toStringAsFixed(6)}, ±${state.accuracy.toStringAsFixed(1)} m',
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
+                      style: TextStyle(color: state.accuracy >= 15.0 ? Colors.red : Colors.green, fontSize: 16, fontWeight: FontWeight.w500),
                     ),
                   ),
                 );

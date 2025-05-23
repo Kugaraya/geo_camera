@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geocam/camera_screen.dart';
-import 'bloc/geotag_state.dart' as geotag_state;
-import 'bloc/geotag_bloc.dart' as geotag_bloc;
+import 'bloc/geotag_state.dart';
+import 'bloc/geotag_bloc.dart';
 import 'bloc/geotag_event.dart';
 
 void main() {
@@ -15,7 +15,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => geotag_bloc.GeotagBloc(),
+      create: (_) => GeotagBloc(),
       child: MaterialApp(
         title: 'Flutter Demo',
         theme: ThemeData(
@@ -47,11 +47,11 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Expanded(
-              child: BlocBuilder<geotag_bloc.GeotagBloc, geotag_state.GeotagState>(
+              child: BlocBuilder<GeotagBloc, GeotagState>(
                 builder: (context, state) {
-                  if (state is geotag_state.GeotagLoading) {
+                  if (state is GeotagLoading) {
                     return const CircularProgressIndicator();
-                  } else if (state is geotag_state.GeotagLoaded) {
+                  } else if (state is GeotagLoaded) {
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -61,13 +61,13 @@ class _MyHomePageState extends State<MyHomePage> {
                         const SizedBox(height: 20),
                         ElevatedButton(
                           onPressed: () {
-                            context.read<geotag_bloc.GeotagBloc>().add(GetLocationEvent());
+                            context.read<GeotagBloc>().add(GetLocationEvent());
                           },
                           child: const Text('Get Location'),
                         ),
                       ],
                     );
-                  } else if (state is geotag_state.GeotagError) {
+                  } else if (state is GeotagError) {
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -75,7 +75,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         const SizedBox(height: 20),
                         ElevatedButton(
                           onPressed: () {
-                            context.read<geotag_bloc.GeotagBloc>().add(GetLocationEvent());
+                            context.read<GeotagBloc>().add(GetLocationEvent());
                           },
                           child: const Text('Try Again'),
                         ),
@@ -85,7 +85,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   // Initial state
                   return ElevatedButton(
                     onPressed: () {
-                      context.read<geotag_bloc.GeotagBloc>().add(GetLocationEvent());
+                      context.read<GeotagBloc>().add(GetLocationEvent());
                     },
                     child: const Text('Get Location'),
                   );

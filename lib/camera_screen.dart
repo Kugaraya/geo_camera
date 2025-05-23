@@ -1,15 +1,16 @@
-import 'package:camera/camera.dart';
+import 'dart:io';
+import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:async';
-import 'package:path_provider/path_provider.dart';
-import 'package:intl/intl.dart';
-import 'dart:io';
 import '../bloc/geotag_bloc.dart';
 import '../bloc/geotag_event.dart';
 import '../bloc/geotag_state.dart';
+import 'package:image/image.dart' as img; // Add this import
+import 'package:intl/intl.dart'; // Add this for date formatting
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -21,7 +22,8 @@ class CameraScreen extends StatefulWidget {
 class _CameraScreenState extends State<CameraScreen> {
   CameraController? _controller;
   List<CameraDescription>? _cameras;
-  bool _isCameraInitialized = false;
+  bool _isInitialized = false;
+  List<String> _folders = [];
   Timer? _locationTimer;
   String? _lastImagePath;
 
@@ -35,23 +37,25 @@ class _CameraScreenState extends State<CameraScreen> {
     ]);
     _initCamera();
     _startLocationUpdates();
+    _loadFolders();
   }
 
   Future<void> _initCamera() async {
+    WidgetsFlutterBinding.ensureInitialized();
     await Permission.camera.request();
     _cameras = await availableCameras();
     if (_cameras != null && _cameras!.isNotEmpty) {
       final CameraDescription camera = _cameras![0];
-      // The camera plugin does not expose FPS selection directly, but we use the highest available resolution
       _controller = CameraController(
         camera,
-        ResolutionPreset.high,
+        fps: 60,
+        ResolutionPreset.max,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await _controller!.initialize();
       setState(() {
-        _isCameraInitialized = true;
+        _isInitialized = true;
       });
     }
   }
@@ -63,6 +67,61 @@ class _CameraScreenState extends State<CameraScreen> {
         context.read<GeotagBloc>().add(GetLocationEvent());
       }
     });
+  }
+
+  Future<void> _loadFolders() async {
+    String basePath = '/storage/emulated/0/DCIM/MIADP_GeoCamera';
+    Directory baseDir = Directory(basePath);
+    if (!(await baseDir.exists())) {
+      await baseDir.create(recursive: true);
+    }
+    List<String> folders = [];
+    await for (var entity in baseDir.list()) {
+      if (entity is Directory) {
+        folders.add(entity.path.split('/').last);
+      }
+    }
+    setState(() {
+      _folders = folders;
+    });
+  }
+
+  Future<void> _capturePhoto() async {
+    if (!_controller!.value.isInitialized) return;
+    final image = await _controller!.takePicture();
+
+    // Format date as "Mon DD, YYYY"
+    final now = DateTime.now();
+    final folderName = DateFormat('MMM dd, yyyy').format(now);
+
+    String basePath = '/storage/emulated/0/DCIM/MIADP_GeoCamera';
+    String saveDirPath = '$basePath/$folderName';
+    Directory saveDir = Directory(saveDirPath);
+    if (!(await saveDir.exists())) {
+      await saveDir.create(recursive: true);
+    }
+    String filePath = '${saveDir.path}/_IMG_${DateFormat('ddmmyyyy').format(DateTime.now())}_${DateFormat('HHMMSS').format(DateTime.now())}.jpg';
+
+    // Save the image first
+    await image.saveTo(filePath);
+
+    // Get geolocation from Bloc
+    final state = context.read<GeotagBloc>().state;
+    double? latitude, longitude;
+    if (state is GeotagLoaded) {
+      latitude = state.latitude;
+      longitude = state.longitude;
+    }
+
+    _savingPhoto(filePath);
+    _loadFolders();
+    _loadLastImage();
+  }
+
+  _savingPhoto(filePath) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Saved to $filePath')),
+    );
   }
 
   @override
@@ -79,130 +138,95 @@ class _CameraScreenState extends State<CameraScreen> {
     super.dispose();
   }
 
-  Future<void> _onCapturePressed() async {
-    if (_controller != null && _controller!.value.isInitialized) {
-      final image = await _controller!.takePicture();
-      final now = DateTime.now();
-      final dateFolder = DateFormat('yyyy-MM-dd').format(now);
-      final Directory extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-      final Directory miadpDir = Directory('${extDir.path}/MIADP/$dateFolder');
-      if (!await miadpDir.exists()) {
-        await miadpDir.create(recursive: true);
-      }
-      final String filePath = '${miadpDir.path}/IMG_${DateFormat('HHmmss').format(now)}.jpg';
-      await image.saveTo(filePath);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Image saved to $filePath')),
-        );
-      }
-      // Optionally, you can show a dialog or navigate to a preview screen
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        extendBodyBehindAppBar: true,
-        backgroundColor: Colors.black,
-        body: _isCameraInitialized
-            ? Stack(
+    if (!_isInitialized) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final aspectRatio = _controller!.value.aspectRatio;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: CameraPreview(_controller!),
+            ),
+          ),
+          BlocBuilder<GeotagBloc, GeotagState>(
+            builder: (context, state) {
+              if (state is GeotagLoaded) {
+                return Positioned(
+                  left: 16,
+                  top: 32,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'Lat: ${state.latitude.toStringAsFixed(6)}, Lng: ${state.longitude.toStringAsFixed(6)}, ±${state.accuracy.toStringAsFixed(1)} m',
+                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                );
+              } else if (state is GeotagLoading) {
+                return const Positioned(
+                  left: 16,
+                  top: 32,
+                  child: CircularProgressIndicator(),
+                );
+              } else {
+                return const SizedBox.shrink();
+              }
+            },
+          ),
+          // Google Camera style controls on the right
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Positioned.fill(
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: _controller!.value.previewSize?.height ?? 1,
-                        height: _controller!.value.previewSize?.width ?? 1,
-                        child: CameraPreview(_controller!),
+                  // Preview button
+                  GestureDetector(
+                    onTap: _onPreviewPressed,
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      margin: const EdgeInsets.only(bottom: 32),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        color: Colors.white.withOpacity(0.2),
+                      ),
+                      child: const Icon(Icons.grid_view, color: Colors.white, size: 32),
+                    ),
+                  ),
+                  // Shutter button (white circle)
+                  GestureDetector(
+                    onTap: _capturePhoto,
+                    child: Container(
+                      width: 70,
+                      height: 70,
+                      margin: const EdgeInsets.only(bottom: 32),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.grey.shade300, width: 4),
                       ),
                     ),
                   ),
-                  BlocBuilder<GeotagBloc, GeotagState>(
-                    builder: (context, state) {
-                      if (state is GeotagLoaded) {
-                        return Positioned(
-                          left: 16,
-                          top: 32,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              'Lat: ${state.latitude.toStringAsFixed(6)}, Lng: ${state.longitude.toStringAsFixed(6)}, ±${state.accuracy.toStringAsFixed(1)} m',
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        );
-                      } else if (state is GeotagLoading) {
-                        return const Positioned(
-                          left: 16,
-                          top: 32,
-                          child: CircularProgressIndicator(),
-                        );
-                      } else {
-                        return const SizedBox.shrink();
-                      }
-                    },
-                  ),
-                  // Google Camera style controls on the right
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 32, bottom: 0, top: 0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Preview button
-                          GestureDetector(
-                            onTap: _onPreviewPressed,
-                            child: Container(
-                              width: 56,
-                              height: 56,
-                              margin: const EdgeInsets.only(bottom: 32),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 3),
-                                color: Colors.white.withOpacity(0.2),
-                              ),
-                              child: _lastImagePath != null
-                                  ? ClipOval(
-                                      child: Image.file(
-                                        File(_lastImagePath!),
-                                        fit: BoxFit.cover,
-                                      ),
-                                    )
-                                  : const Icon(Icons.photo, color: Colors.white, size: 32),
-                            ),
-                          ),
-                          // Shutter button
-                          Container(
-                            width: 80,
-                            height: 80,
-                            margin: const EdgeInsets.only(bottom: 32),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 6),
-                              color: Colors.white.withOpacity(0.2),
-                            ),
-                            child: IconButton(
-                              icon: const Icon(Icons.camera, size: 40, color: Colors.white),
-                              onPressed: _onCapturePressed,
-                            ),
-                          ),
-                          // Spacer for future controls
-                          const SizedBox(height: 80),
-                        ],
-                      ),
-                    ),
-                  ),
+                  // Spacer for future controls
+                  const SizedBox(height: 80),
                 ],
-              )
-            : const Center(child: CircularProgressIndicator()),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -215,11 +239,11 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _loadLastImage() async {
     final now = DateTime.now();
-    final dateFolder = DateFormat('yyyy-MM-dd').format(now);
-    final Directory extDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-    final Directory miadpDir = Directory('${extDir.path}/MIADP/$dateFolder');
-    if (await miadpDir.exists()) {
-      final files = miadpDir
+    final folderName = DateFormat('MMM dd, yyyy').format(now);
+    String saveDirPath = '/storage/emulated/0/DCIM/MIADP_GeoCamera/$folderName';
+    final Directory saveDir = Directory(saveDirPath);
+    if (await saveDir.exists()) {
+      final files = saveDir
           .listSync()
           .whereType<File>()
           .where((f) => f.path.endsWith('.jpg'))
@@ -233,18 +257,86 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  void _onPreviewPressed() {
-    if (_lastImagePath != null) {
-      showDialog(
-        context: context,
-        builder: (context) => Dialog(
-          backgroundColor: Colors.transparent,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.file(File(_lastImagePath!), fit: BoxFit.contain),
-          ),
-        ),
-      );
+  void _onPreviewPressed() async {
+    String basePath = '/storage/emulated/0/DCIM/MIADP_GeoCamera';
+    Directory baseDir = Directory(basePath);
+    List<String> folders = [];
+    await for (var entity in baseDir.list()) {
+      if (entity is Directory) {
+        folders.add(entity.path.split('/').last);
+      }
     }
+    folders.sort((a, b) => b.compareTo(a)); // newest first
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return DefaultTabController(
+          length: folders.length,
+          child: Dialog(
+            backgroundColor: Colors.black87,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TabBar(
+                  isScrollable: true,
+                  tabs: folders.map((f) => Tab(text: f)).toList(),
+                ),
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.675,
+                  width: MediaQuery.of(context).size.width * 0.8,
+                  child: TabBarView(
+                    children: folders.map((folder) {
+                      final dir = Directory('$basePath/$folder');
+                      final images = dir
+                          .listSync()
+                          .whereType<File>()
+                          .where((f) => f.path.endsWith('.jpg'))
+                          .toList()
+                        ..sort((a, b) => b.path.compareTo(a.path));
+                      if (images.isEmpty) {
+                        return const Center(child: Text('No images', style: TextStyle(color: Colors.white)));
+                      }
+                      return GridView.builder(
+                        padding: const EdgeInsets.all(8),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 8,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                        ),
+                        itemCount: images.length,
+                        itemBuilder: (context, idx) {
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).pop();
+                              showDialog(
+                                context: context,
+                                builder: (_) => Dialog(
+                                  backgroundColor: Colors.transparent,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Image.file(images[idx], fit: BoxFit.contain),
+                                  ),
+                                ),
+                              );
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(images[idx], fit: BoxFit.cover),
+                            ),
+                          );
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
+  
+  
 }

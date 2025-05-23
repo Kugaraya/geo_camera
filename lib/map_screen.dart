@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_osm_plugin/flutter_osm_plugin.dart';
 import 'bloc/geotag_bloc.dart';
 import 'bloc/geotag_state.dart';
 
@@ -12,51 +12,66 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  GoogleMapController? _mapController;
-  MapType _mapType = MapType.normal;
+  late MapController _mapController;
+
+  @override
+  void initState() {
+    _mapController = MapController(
+      initMapWithUserPosition: UserTrackingOption(
+        enableTracking: true,
+        unFollowUser: false
+      ),
+    );
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Device Location'),
-        actions: [
-          PopupMenuButton<MapType>(
-            icon: const Icon(Icons.layers),
-            onSelected: (type) => setState(() => _mapType = type),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: MapType.normal, child: Text('Normal')),
-              const PopupMenuItem(value: MapType.satellite, child: Text('Satellite')),
-              const PopupMenuItem(value: MapType.terrain, child: Text('Terrain')),
-              const PopupMenuItem(value: MapType.hybrid, child: Text('Hybrid')),
-            ],
-          ),
-        ],
-      ),
       body: BlocBuilder<GeotagBloc, GeotagState>(
         builder: (context, state) {
           if (state is GeotagLoaded) {
-            final latLng = LatLng(state.latitude, state.longitude);
             return Stack(
               children: [
-                GoogleMap(
-                  mapType: _mapType,
-                  initialCameraPosition: CameraPosition(target: latLng, zoom: 17),
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: true,
-                  markers: {
-                    Marker(
-                      markerId: const MarkerId('current_location'),
-                      position: latLng,
-                      infoWindow: InfoWindow(
-                        title: 'You are here',
-                        snippet: 'Lat: ${latLng.latitude.toStringAsFixed(6)}, Lng: ${latLng.longitude.toStringAsFixed(6)}',
+                OSMFlutter(
+                  controller: _mapController,
+                  mapIsLoading: const Center(child: CircularProgressIndicator()),
+                    osmOption: OSMOption(
+                      userTrackingOption: const UserTrackingOption(
+                      enableTracking: true,
+                      unFollowUser: false,
+                    ),
+                    zoomOption: const ZoomOption(
+                      initZoom: 8,
+                      minZoomLevel: 3,
+                      maxZoomLevel: 19,
+                      stepZoom: 1.0,
+                    ),
+                    userLocationMarker: UserLocationMaker(
+                      personMarker: const MarkerIcon(
+                        icon: Icon(
+                          Icons.location_history_rounded,
+                          color: Colors.red,
+                          size: 48,
+                        ),
+                      ),
+                      directionArrowMarker: const MarkerIcon(
+                        icon: Icon(
+                          Icons.double_arrow,
+                          size: 48,
+                        ),
                       ),
                     ),
-                  },
-                  onMapCreated: (controller) {
-                    _mapController = controller;
-                  },
+                    roadConfiguration: const RoadOption(
+                      roadColor: Colors.yellowAccent,
+                    ),
+                  ),
+                  onMapIsReady: (isReady) async {
+                    if (isReady) {
+                      await _mapController.currentLocation();
+                      await _mapController.centerMap;
+                    }
+                  }, 
                 ),
                 Positioned(
                   bottom: 24,
@@ -68,7 +83,7 @@ class _MapScreenState extends State<MapScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      'Lat: ${latLng.latitude.toStringAsFixed(6)}\nLng: ${latLng.longitude.toStringAsFixed(6)}',
+                      'Lat: ${state.latitude.toStringAsFixed(6)}\nLng: ${state.longitude.toStringAsFixed(6)}',
                       style: const TextStyle(color: Colors.white, fontSize: 16),
                     ),
                   ),
@@ -85,7 +100,6 @@ class _MapScreenState extends State<MapScreen> {
               ),
             );
           }
-          // Initial or unknown state
           return const Center(child: CircularProgressIndicator());
         },
       ),

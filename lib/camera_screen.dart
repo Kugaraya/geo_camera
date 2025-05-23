@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:geocam/map_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -26,6 +27,9 @@ class _CameraScreenState extends State<CameraScreen> {
   List<String> _folders = [];
   Timer? _locationTimer;
   String? _lastImagePath;
+  FlashMode _flashMode = FlashMode.off;
+  int _selectedCameraIdx = 0;
+  bool _isRearCameraSelected = true;
 
   @override
   void initState() {
@@ -45,7 +49,7 @@ class _CameraScreenState extends State<CameraScreen> {
     await Permission.camera.request();
     _cameras = await availableCameras();
     if (_cameras != null && _cameras!.isNotEmpty) {
-      final CameraDescription camera = _cameras![0];
+      final CameraDescription camera = _cameras![_selectedCameraIdx];
       _controller = CameraController(
         camera,
         fps: 60,
@@ -54,8 +58,10 @@ class _CameraScreenState extends State<CameraScreen> {
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await _controller!.initialize();
+      await _controller!.setFlashMode(_flashMode);
       setState(() {
         _isInitialized = true;
+        _isRearCameraSelected = camera.lensDirection == CameraLensDirection.back;
       });
     }
   }
@@ -172,12 +178,6 @@ class _CameraScreenState extends State<CameraScreen> {
                     ),
                   ),
                 );
-              } else if (state is GeotagLoading) {
-                return const Positioned(
-                  left: 16,
-                  top: 32,
-                  child: CircularProgressIndicator(),
-                );
               } else {
                 return const SizedBox.shrink();
               }
@@ -187,42 +187,98 @@ class _CameraScreenState extends State<CameraScreen> {
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
-              padding: const EdgeInsets.only(right: 32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Preview button
-                  GestureDetector(
-                    onTap: _onPreviewPressed,
-                    child: Container(
-                      width: 56,
-                      height: 56,
-                      margin: const EdgeInsets.only(bottom: 32),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        color: Colors.white.withOpacity(0.2),
-                      ),
-                      child: const Icon(Icons.grid_view, color: Colors.white, size: 32),
-                    ),
-                  ),
-                  // Shutter button (white circle)
-                  GestureDetector(
-                    onTap: _capturePhoto,
-                    child: Container(
-                      width: 70,
-                      height: 70,
-                      margin: const EdgeInsets.only(bottom: 32),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.grey.shade300, width: 4),
+              padding: const EdgeInsets.only(right: 20),
+              child: SizedBox(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // Map button
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const MapScreen()),
+                        );
+                      },
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          color: Colors.white.withOpacity(0.2),
+                        ),
+                        child: const Icon(Icons.location_pin, color: Colors.white, size: 32),
                       ),
                     ),
-                  ),
-                  // Spacer for future controls
-                  const SizedBox(height: 80),
-                ],
+                    // Preview button
+                    GestureDetector(
+                      onTap: _onPreviewPressed,
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          color: Colors.white.withOpacity(0.2),
+                        ),
+                        child: const Icon(Icons.grid_view, color: Colors.white, size: 32),
+                      ),
+                    ),
+                    // Shutter button (white circle)
+                    GestureDetector(
+                      onTap: _capturePhoto,
+                      child: Container(
+                        width: 70,
+                        height: 70,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.grey.shade300, width: 4),
+                        ),
+                      ),
+                    ),
+                    // Flash toggle button
+                    GestureDetector(
+                      onTap: _toggleFlash,
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          color: Colors.white.withOpacity(0.2),
+                        ),
+                        child: Icon(
+                          _flashMode == FlashMode.torch ? Icons.flash_on : Icons.flash_off,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ),
+                    ),
+                    // Camera switch button
+                    GestureDetector(
+                      onTap: _switchCamera,
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          color: Colors.white.withOpacity(0.2),
+                        ),
+                        child: Icon(
+                          Icons.cameraswitch,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -338,5 +394,25 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
   
-  
+  void _toggleFlash() async {
+    if (_controller == null) return;
+    setState(() {
+      if (_flashMode == FlashMode.off) {
+        _flashMode = FlashMode.torch;
+      } else {
+        _flashMode = FlashMode.off;
+      }
+    });
+    await _controller!.setFlashMode(_flashMode);
+  }
+
+  void _switchCamera() async {
+    if (_cameras == null || _cameras!.length < 2) return;
+    setState(() {
+      _selectedCameraIdx = (_selectedCameraIdx + 1) % _cameras!.length;
+      _isInitialized = false;
+    });
+    await _controller?.dispose();
+    await _initCamera();
+  }
 }

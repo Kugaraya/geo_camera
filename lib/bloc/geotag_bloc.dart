@@ -27,7 +27,7 @@ class GeotagBloc extends Bloc<GeotagEvent, GeotagState> {
           emit(GeotagError(message: 'Location permissions are permanently denied.'));
           return;
         }
-        Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
+        Position position = await Geolocator.getCurrentPosition(locationSettings: LocationSettings(accuracy: LocationAccuracy.bestForNavigation));
         emit(GeotagLoaded(
           latitude: position.latitude, 
           longitude: position.longitude, 
